@@ -45,7 +45,7 @@ const readBplistFile = (name, buffer) => {
         break;
       case 0x4: {
         const data = buffer.readBuffer(length);
-        fs.writeFileSync(`out/data1/${name}-${i}`, Buffer.from(data));
+        fs.writeFile(`out/data1/${name}-${i}`, Buffer.from(data), () => {});
         console.log(`data of size ${length}: ${data.slice(0, 20).toString('hex')}`);
         break;
       }
@@ -113,7 +113,7 @@ const extractData2 = (buffer) => {
     const offset = buffer.readUInt32LE(startAddress + i * 28 + 4);
     const length = buffer.readUInt32LE(startAddress + i * 28 + 8);
     const sound = data2.slice(offset, offset + length);
-    fs.writeFileSync(`out/data2/${name}.raw`, sound);
+    fs.writeFile(`out/data2/${name}.raw`, sound, () => {});
   }
 };
 
@@ -127,7 +127,7 @@ const extractData3 = (buffer) => {
     const offset = buffer.readUInt32LE(startAddress + i * 12 + 4);
     const length = buffer.readUInt32LE(startAddress + i * 12 + 8);
     const sound = data3.slice(offset, offset + length);
-    fs.writeFileSync(`out/data3/${name}.m4a`, sound);
+    fs.writeFile(`out/data3/${name}.m4a`, sound, () => {});
   }
 };
 
@@ -139,8 +139,8 @@ const main = () => {
 
   const codeBuffer = fs.readFileSync('Project1112e03hd');
 
-  // extractData1(codeBuffer);
-  // extractData2(codeBuffer);
+  extractData1(codeBuffer);
+  extractData2(codeBuffer);
   extractData3(codeBuffer);
 };
 
