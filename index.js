@@ -1,79 +1,9 @@
 const { SmartBuffer } = require('smart-buffer');
 const fs = require('fs');
-
-const intFromBytes = (byteArr) => byteArr.reduce(
-  (a, c, i) => a + c * 2 ** ((byteArr.length - i - 1) * 8),
-  0,
-);
-
-const readBplistFile = (name, buffer) => {
-  const magicBytes = buffer.readString(8);
-  const trailer = buffer.internalBuffer.slice(buffer.length - 32);
-  const sortVersion = trailer.readUInt8(5);
-  const offsetTableOffsetSize = trailer.readUInt8(6);
-  const offsetRefSize = trailer.readUInt8(7);
-  const numObjects = trailer.readBigInt64BE(8);
-  const topObjectOffset = trailer.readBigInt64BE(16);
-  const offsetTableStart = trailer.readBigInt64BE(24);
-
-  if (magicBytes !== 'bplist00') {
-    throw Error('Invalid bplist file');
-  }
-
-  for (let i = 0; i < numObjects; i += 1) {
-    const marker = buffer.readUInt8();
-    const type = marker >> 4;
-    let length = marker & 0xF;
-
-    if (length === 0xf && type !== 0x1 && type !== 0x2) {
-      const nextByte = buffer.readUInt8();
-      const lengthOfLengthBytes = 2 ** (nextByte & 0xf);
-      const lengthBytes = buffer.readBuffer(lengthOfLengthBytes);
-      length = intFromBytes(lengthBytes);
-    }
-
-    switch (type) {
-      case 0x0:
-        break;
-      case 0x1:
-      case 0x2:
-        length = 2 ** length;
-        buffer.readBuffer(length);
-        break;
-      case 0x3:
-        buffer.readBuffer(8);
-        break;
-      case 0x4: {
-        const data = buffer.readBuffer(length);
-        fs.writeFile(`out/data1/${name}-${i}`, Buffer.from(data), () => {});
-        console.log(`data of size ${length}: ${data.slice(0, 20).toString('hex')}`);
-        break;
-      }
-      case 0x5: {
-        const string = buffer.readString(length, 'utf-8');
-        // console.log(string);
-        break;
-      }
-      case 0x6: {
-        const string = buffer.readBuffer(length * 2).swap16().toString('utf16le');
-        // console.log(string);
-        break;
-      }
-      case 0x8:
-        buffer.readBuffer(length + 1);
-        break;
-      case 0xa:
-      case 0xc:
-        buffer.readBuffer(offsetRefSize * length);
-        break;
-      case 0xd:
-        buffer.readBuffer(offsetRefSize * length * 2);
-        break;
-      default:
-        break;
-    }
-  }
-};
+const bplist = require('bplist-parser');
+const pako = require('pako');
+const sharp = require('sharp');
+const { exit } = require('process');
 
 const readNullTerminatedString = (buffer, offset) => {
   const bytes = [];
@@ -90,6 +20,51 @@ const readNullTerminatedString = (buffer, offset) => {
   return bytes.join('');
 };
 
+const getPixelsData = (data, size) => {
+  if (size === 0) {
+    return null;
+  }
+
+  if (data.length !== size) {
+    return pako.inflate(data);
+  }
+
+  return data;
+};
+
+const getPixels = (textureFormat, colorData, alphaData) => {
+  const pixels = [];
+  switch (textureFormat) {
+    case 3:
+      for (let i = 0; i < colorData.length / 2; i += 1) {
+        pixels.push(
+          Math.floor(((colorData[2 * i + 1] & 0b11111000) >> 3) * 255 / 31),
+          Math.floor((((colorData[2 * i + 1] & 0b111) << 3) | ((colorData[2 * i] & 0b11100000) >> 5)) * 255 / 63),
+          Math.floor((colorData[2 * i] & 0b00011111) * 255 / 31),
+          255,
+        );
+      }
+      return pixels;
+    case 4:
+      for (let i = 0; i < alphaData.length; i += 1) {
+        pixels.push(
+          Math.floor(((colorData[2 * i + 1] & 0b11111000) >> 3) * 255 / 31),
+          Math.floor((((colorData[2 * i + 1] & 0b111) << 3) | ((colorData[2 * i] & 0b11100000) >> 5)) * 255 / 63),
+          Math.floor((colorData[2 * i] & 0b00011111) * 255 / 31),
+          alphaData[i],
+        );
+      }
+      return pixels;
+    case 5:
+      for (let i = 0; i < alphaData.length; i += 1) {
+        pixels.push(0, 0, 0, alphaData[i]);
+      }
+      return pixels;
+    default:
+      throw Error(`Unsupported texture format: ${textureFormat}`);
+  }
+};
+
 const extractData1 = (buffer) => {
   const startAddress = 0xf434c;
   const data1 = fs.readFileSync('Data1.dat');
@@ -97,9 +72,47 @@ const extractData1 = (buffer) => {
   for (let i = 0; i < 562; i += 1) {
     const nameOffset = buffer.readUInt32LE(startAddress + i * 12) - 0x1000;
     const name = readNullTerminatedString(buffer, nameOffset);
+
     const offset = buffer.readUInt32LE(startAddress + i * 12 + 4);
     const length = buffer.readUInt32LE(startAddress + i * 12 + 8);
-    readBplistFile(name, SmartBuffer.fromBuffer(data1.slice(offset, offset + length)));
+    // if (name !== 'AnticShop') {
+    //   continue;
+    // }
+    const data = bplist.parseBuffer(data1.slice(offset, offset + length));
+    const textures = data[0].$objects
+      ? data[0].$objects.filter((o) => typeof o === 'object' && 'TextureBufferColorData' in o)
+      : [];
+
+    // const meshSplitBufferData = data[0].$objects[17]['NS.data'];
+    // const meshSplitIndicesData = data[0].$objects[19]['NS.data'];
+
+    textures.forEach((texture) => {
+      const width = texture.TextureSizeWidth;
+      const height = texture.TextureSizeHeight;
+      const textureFormat = texture.TextureFormat;
+      const colorData = getPixelsData(
+        data[0].$objects[texture.TextureBufferColorData.UID],
+        texture.TextureBufferColorDataSize,
+      );
+      const alphaData = getPixelsData(
+        data[0].$objects[texture.TextureBufferAlphaData.UID],
+        texture.TextureBufferAlphaDataSize,
+      );
+
+      if (textureFormat === 6 || textureFormat === 7) {
+        // fs.writeFile(`out/data1/${name}-${i}-color.pvr`, colorData, () => { });
+        // fs.writeFile(`out/data1/${name}-${i}-alpha.pvr`, alphaData, () => { });
+      } else if (textureFormat === 3) {
+        const pixels = getPixels(textureFormat, colorData, alphaData);
+        sharp(Buffer.from(pixels), {
+          raw: {
+            width,
+            height,
+            channels: 4,
+          },
+        }).toFile(`out/data1/${name}-${i}-${textureFormat}.png`);
+      }
+    });
   }
 };
 
