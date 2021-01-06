@@ -117,6 +117,20 @@ const extractData2 = (buffer) => {
   }
 };
 
+const extractData3 = (buffer) => {
+  const startAddress = 0xf78cc;
+  const data3 = fs.readFileSync('Data3.dat');
+
+  for (let i = 0; i < 11; i += 1) {
+    const nameOffset = buffer.readUInt32LE(startAddress + i * 12) - 0x1000;
+    const name = readNullTerminatedString(buffer, nameOffset);
+    const offset = buffer.readUInt32LE(startAddress + i * 12 + 4);
+    const length = buffer.readUInt32LE(startAddress + i * 12 + 8);
+    const sound = data3.slice(offset, offset + length);
+    fs.writeFileSync(`out/data3/${name}.m4a`, sound);
+  }
+};
+
 const main = () => {
   fs.rmdirSync('out', { recursive: true });
   fs.mkdirSync('out/data1', { recursive: true });
@@ -125,8 +139,9 @@ const main = () => {
 
   const codeBuffer = fs.readFileSync('Project1112e03hd');
 
-  extractData1(codeBuffer);
+  // extractData1(codeBuffer);
   // extractData2(codeBuffer);
+  extractData3(codeBuffer);
 };
 
 main();
