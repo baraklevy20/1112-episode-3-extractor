@@ -100,9 +100,10 @@ const extractData1 = (buffer) => {
       );
 
       if (textureFormat === 6 || textureFormat === 7) {
-        // fs.writeFile(`out/data1/${name}-${i}-color.pvr`, colorData, () => { });
-        // fs.writeFile(`out/data1/${name}-${i}-alpha.pvr`, alphaData, () => { });
-      } else if (textureFormat === 3) {
+        fs.writeFile(`out/data1/${name}-${i}-color.pvr`, colorData, () => { });
+        fs.writeFile(`out/data1/${name}-${i}-alpha.pvr`, alphaData, () => { });
+      } else {
+      // else if (textureFormat === 3) {
         const pixels = getPixels(textureFormat, colorData, alphaData);
         sharp(Buffer.from(pixels), {
           raw: {
